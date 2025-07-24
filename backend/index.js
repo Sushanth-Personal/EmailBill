@@ -4,12 +4,15 @@ const session = require('express-session');
 const dotenv = require('dotenv');
 const { google } = require('googleapis');
 const axios = require('axios');
+const morgan = require('morgan')
 
 dotenv.config();
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+app.use(morgan());
 // Middleware
 app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
 app.use(express.json());
@@ -30,6 +33,7 @@ const oauth2Client = new google.auth.OAuth2(
 );
 
 app.get('/auth/google', (req, res) => {
+    console.log("yousdfasd")
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/gmail.readonly'],
@@ -41,6 +45,7 @@ app.get('/auth/google', (req, res) => {
 app.get('/auth/google/callback', async (req, res) => {
   const { code } = req.query;
   try {
+    console.log("Yohoyouoyoy")
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
     req.session.googleTokens = tokens;

@@ -3,13 +3,11 @@ import { Button, Container, Typography } from '@mui/material';
 
 function Login() {
   const handleGoogleLogin = () => {
-    // Placeholder for Google OAuth redirect (implemented in Step 2)
-    alert('Google Login will be implemented');
+    window.location.href = 'https://emailbill.onrender.com/auth/google';
   };
 
-  const handlePracticePantherLogin = () => {
-    // Placeholder for PracticePanther OAuth redirect
-    alert('PracticePanther Login will be implemented');
+  const handleClioLogin = () => {
+    window.location.href = 'https://emailbill.onrender.com/auth/clio';
   };
 
   return (
@@ -27,11 +25,11 @@ function Login() {
       </Button>
       <Button
         variant="contained"
-        color="secondary"
-        onClick={handlePracticePantherLogin}
+        color="info"
+        onClick={handleClioLogin}
         style={{ margin: '10px' }}
       >
-        Login with PracticePanther
+        Login with Clio
       </Button>
     </Container>
   );

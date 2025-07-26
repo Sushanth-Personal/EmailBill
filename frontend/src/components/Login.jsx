@@ -7,7 +7,7 @@ function Login() {
   };
 
   const handleClioLogin = () => {
-    window.location.href = 'https://localhost:3000/auth/clio';
+    window.location.href = 'https://emailbill.onrender.com/auth/clio';
   };
 
   return (

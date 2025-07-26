@@ -2,7 +2,7 @@ require('dotenv').config({ path: '.env' });
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
-const MongoDBStore = require('connect-mongodb-session')(session);
+const MongoStore = require('connect-mongo');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const OAuth2Strategy = require('passport-oauth2').Strategy;
@@ -46,50 +46,29 @@ console.log('Environment Variables:', {
 });
 
 // Initialize MongoDB and session store
-let store;
 async function initializeApp() {
   try {
     // Connect to MongoDB
     await connectDB();
 
-    // Wait for Mongoose connection to be fully established
+    // Wait for Mongoose connection
     if (mongoose.connection.readyState !== 1) {
+      console.log('Waiting for Mongoose connection...');
       await new Promise((resolve, reject) => {
         mongoose.connection.once('connected', resolve);
         mongoose.connection.once('error', reject);
       });
     }
+    console.log('Mongoose connection ready:', mongoose.connection.readyState);
 
-    // Initialize MongoDB session store
-    store = new MongoDBStore({
-      mongooseConnection: mongoose.connection,
-      collection: 'sessions',
-    });
-
-    store.on('error', (error) => {
-      console.error('Session store error:', error.message);
-    });
-
-    // Verify session store connection
-    await new Promise((resolve, reject) => {
-      store.once('connected', () => {
-        console.log('MongoDB session store connected');
-        resolve();
-      });
-      store.once('error', (error) => {
-        console.error('Session store initialization error:', error.message);
-        reject(error);
-      });
+    // Start server after MongoDB connection
+    const port = process.env.PORT || 5000;
+    app.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}`);
     });
   } catch (error) {
-    console.error('Failed to initialize MongoDB session store:', error.message);
-    if (process.env.NODE_ENV === 'production') {
-      console.error('Production environment requires MongoDB session store. Exiting.');
-      process.exit(1);
-    } else {
-      console.warn('Using in-memory session store as fallback (not suitable for production)');
-      store = new session.MemoryStore();
-    }
+    console.error('Failed to initialize app:', error.message, error.stack);
+    process.exit(1);
   }
 }
 
@@ -112,7 +91,15 @@ app.use(
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    store: store,
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      collectionName: 'sessions',
+      connectionOptions: {
+        serverSelectionTimeoutMS: 10000,
+        socketTimeoutMS: 45000,
+        connectTimeoutMS: 10000,
+      },
+    }),
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
@@ -369,12 +356,15 @@ app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', mongodbConnected: mongoose.connection.readyState === 1 });
+  res.status(200).json({
+    status: 'OK',
+    mongodbConnected: mongoose.connection.readyState === 1,
+  });
 });
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error('Server Error:', err.stack);
+  console.error('Server error:', err.stack);
   res.status(500).json({ error: 'Server error' });
 });
 
@@ -383,15 +373,5 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.stack);
 });
 
-// Start server after initialization
-initializeApp()
-  .then(() => {
-    const port = process.env.PORT || 5000;
-    app.listen(port, () => {
-      console.log(`Server running on http://localhost:${port}`);
-    });
-  })
-  .catch((err) => {
-    console.error('Failed to initialize app:', err);
-    process.exit(1);
-  });
+// Start server
+initializeApp();

@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
-const MongoDBStore = require('connect-mongodb-session')(session); // Add MongoDB session store
+const MongoDBStore = require('connect-mongodb-session')(session);
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const OAuth2Strategy = require('passport-oauth2').Strategy;
@@ -13,8 +13,14 @@ const app = express();
 
 // MongoDB session store
 const store = new MongoDBStore({
-  uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/emailbill',
+  uri: process.env.MONGODB_URI,
   collection: 'sessions',
+  connectionOptions: {
+    ssl: true,
+    tls: true,
+    serverSelectionTimeoutMS: 5000, // 5s timeout
+    maxPoolSize: 10,
+  },
 });
 
 store.on('error', function (error) {
@@ -38,6 +44,8 @@ app.use(
   cors({
     origin: process.env.FRONTEND_URL, // https://email-bill.vercel.app
     credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 
@@ -52,9 +60,10 @@ app.use(
     saveUninitialized: false,
     store: store,
     cookie: {
-      secure: process.env.NODE_ENV === 'production', // true in production
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // none for cross-site in prod
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      httpOnly: true,
     },
   })
 );
@@ -353,10 +362,10 @@ app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Server Error:', err.stack);
-  res.status(500).redirect(`${process.env.FRONTEND_URL}/dashboard?error=server_error`);
+  res.status(500).json({ error: 'Server error' });
 });
 
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });

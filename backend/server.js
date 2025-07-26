@@ -36,7 +36,7 @@ console.log('Environment Variables:', {
   FRONTEND_URL: process.env.FRONTEND_URL,
   PORT: process.env.PORT,
   HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY ? '[SET]' : '[NOT SET]',
-  MONGODB_URI: process.env.MONGODB_URI ? '[SET]' : '[NOT SET]',
+  MONGODB_URI: process.env.MONGODB_URI
 });
 
 // Configure CORS

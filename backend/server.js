@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ path: '.env' });
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
@@ -6,35 +6,65 @@ const MongoDBStore = require('connect-mongodb-session')(session);
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const OAuth2Strategy = require('passport-oauth2').Strategy;
-const {google} = require('googleapis');
+const { google } = require('googleapis');
 const axios = require('axios');
+const mongoose = require('mongoose');
+const connectDB = require('./db');
 
+// Initialize app
 const app = express();
 
-// MongoDB session store
-const store = new MongoDBStore({
-  uri: process.env.MONGODB_URI,
-  collection: 'sessions',
-  connectionOptions: {
-    serverSelectionTimeoutMS: 10000, // 10s timeout
-    maxPoolSize: 10,
-  },
-});
+// Connect to MongoDB
+connectDB();
 
-store.on('error', function (error) {
-  console.error('Session store error:', error.message);
-});
+// Validate environment variables
+if (!process.env.SESSION_SECRET) {
+  console.error('Error: SESSION_SECRET is not defined');
+  process.exit(1);
+}
+if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
+  console.error('Error: Google OAuth environment variables are missing');
+  process.exit(1);
+}
+if (!process.env.CLIO_CLIENT_ID || !process.env.CLIO_CLIENT_SECRET || !process.env.CLIO_REDIRECT_URI) {
+  console.error('Error: Clio OAuth environment variables are missing');
+  process.exit(1);
+}
+if (!process.env.FRONTEND_URL) {
+  console.error('Error: FRONTEND_URL is not defined');
+  process.exit(1);
+}
+
+// MongoDB session store
+let store;
+try {
+  if (!process.env.MONGODB_URI) {
+    throw new Error('MONGODB_URI is not defined');
+  }
+  store = new MongoDBStore({
+    mongooseConnection: mongoose.connection, // Use Mongoose connection
+    collection: 'sessions',
+  });
+  store.on('error', (error) => {
+    console.error('Session store error:', error.message);
+  });
+} catch (error) {
+  console.error('Failed to initialize MongoDB session store:', error.message);
+  store = new session.MemoryStore();
+  console.warn('Using in-memory session store as fallback (not suitable for production)');
+}
 
 // Log environment variables
 console.log('Environment Variables:', {
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? '[SET]' : '[NOT SET]',
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
-  CLIO_CLIENT_ID: process.env.CLIO_CLIENT_ID,
+  CLIO_CLIENT_ID: process.env.CLIO_CLIENT_ID ? '[SET]' : '[NOT SET]',
   CLIO_REDIRECT_URI: process.env.CLIO_REDIRECT_URI,
-  FRONTENDEND_URL: process.env.FRONTEND_URL,
-  PORT: process.env.PORT,
+  FRONTEND_URL: process.env.FRONTEND_URL,
+  PORT: process.env.PORT || '5000',
   HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY ? '[SET]' : '[NOT SET]',
   MONGODB_URI: process.env.MONGODB_URI ? '[SET]' : '[NOT SET]',
+  NODE_ENV: process.env.NODE_ENV,
 });
 
 // Configure CORS
@@ -50,7 +80,7 @@ app.use(
 // Parse JSON bodies
 app.use(express.json());
 
-// Configure session with error handling
+// Configure session
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -60,7 +90,7 @@ app.use(
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 24 * 60 * 60 * 1000,
       httpOnly: true,
     },
   })
@@ -103,13 +133,7 @@ passport.use(
       if (!accessToken || !profile) {
         return done(new Error('Invalid credentials or missing profile'));
       }
-      const user = {
-        google: {
-          accessToken,
-          refreshToken,
-          profile,
-        },
-      };
+      const user = { google: { accessToken, refreshToken, profile } };
       if (req.user) {
         return done(null, mergeUser(req.user, user));
       }
@@ -132,14 +156,8 @@ passport.use(
     },
     async (req, accessToken, refreshToken, params, profile, done) => {
       try {
-        console.log('Clio OAuth Callback:', { accessToken, refreshToken, params });
-        const user = {
-          clio: {
-            accessToken,
-            refreshToken,
-            profile: {},
-          },
-        };
+        console.log('Clio OAuth Callback:', { accessToken, refreshToken });
+        const user = { clio: { accessToken, refreshToken, profile: {} } };
         if (req.user) {
           return done(null, mergeUser(req.user, user));
         }
@@ -154,10 +172,10 @@ passport.use(
 
 // Middleware to check authentication
 const ensureAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated() && req.user.google && req.user.clio) {
+  if (req.isAuthenticated()) {
     return next();
   }
-  res.status(401).json({ error: 'Not authenticated or missing Google/Clio connection' });
+  res.status(401).json({ error: 'Not authenticated' });
 };
 
 // Routes
@@ -186,17 +204,13 @@ app.get('/auth/clio', passport.authenticate('clio', { scope: ['read', 'write'] }
 
 app.get('/auth/clio/callback', (req, res, next) => {
   passport.authenticate('clio', (err, user, info) => {
-    if (err) {
-      console.error('Clio Callback Authentication Error:', err);
-      return res.redirect(`${process.env.FRONTEND_URL}/dashboard?error=clio_auth_failed`);
-    }
-    if (!user) {
-      console.error('Clio Callback: No user returned:', info);
+    if (err || !user) {
+      console.error('Clio Callback Error:', err || info);
       return res.redirect(`${process.env.FRONTEND_URL}/dashboard?error=clio_auth_failed`);
     }
     req.logIn(user, (loginErr) => {
       if (loginErr) {
-        console.error('Clio Callback Login Error:', loginErr);
+        console.error('Clio Login Error:', loginErr);
         return res.redirect(`${process.env.FRONTEND_URL}/dashboard?error=clio_auth_failed`);
       }
       console.log('Clio OAuth callback successful:', user);
@@ -208,10 +222,7 @@ app.get('/auth/clio/callback', (req, res, next) => {
 // User info endpoint
 app.get('/api/user', (req, res) => {
   if (req.isAuthenticated()) {
-    res.json({
-      google: req.user.google || null,
-      clio: req.user.clio || null,
-    });
+    res.json({ google: req.user.google || null, clio: req.user.clio || null });
   } else {
     res.status(401).json({ error: 'Not authenticated' });
   }
@@ -248,7 +259,6 @@ app.get('/api/emails', ensureAuthenticated, async (req, res) => {
         return { id: msg.id, subject, to, date, body };
       })
     );
-
     res.json(emails);
   } catch (error) {
     console.error('Error fetching emails:', error);
@@ -260,9 +270,7 @@ app.get('/api/emails', ensureAuthenticated, async (req, res) => {
 app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   try {
     const response = await axios.get('https://app.clio.com/api/v4/matters', {
-      headers: {
-        Authorization: `Bearer ${req.user.clio.accessToken}`,
-      },
+      headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
     });
     const matters = response.data.data.map((matter) => ({
       id: matter.id,
@@ -275,37 +283,21 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Summarize email content with Hugging Face BERT
+// Summarize email
 app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text) {
-      return res.status(400).json({ error: 'Text is required' });
-    }
+    if (!text) return res.status(400).json({ error: 'Text is required' });
     if (!process.env.HUGGINGFACE_API_KEY) {
       return res.status(500).json({ error: 'Hugging Face API key is not configured' });
     }
-
     const response = await axios.post(
       'https://api-inference.huggingface.co/models/facebook/bart-large-cnn',
-      {
-        inputs: text,
-        parameters: {
-          max_length: 100,
-          min_length: 30,
-          do_sample: false,
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
+      { inputs: text, parameters: { max_length: 100, min_length: 30, do_sample: false } },
+      { headers: { Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`, 'Content-Type': 'application/json' } }
     );
-
     const summary = response.data[0]?.summary_text || 'Summary not generated.';
-    const duration = summary.length / 1000 + 0.5; // Example duration
+    const duration = summary.length / 1000 + 0.5;
     res.json({ summary, duration });
   } catch (error) {
     console.error('Error summarizing:', error.response?.data || error.message);
@@ -319,17 +311,8 @@ app.post('/api/time-entry', ensureAuthenticated, async (req, res) => {
     const { matterId, duration, description, date } = req.body;
     const response = await axios.post(
       'https://app.clio.com/api/v4/time_entries',
-      {
-        matter: { id: matterId },
-        quantity: duration * 3600,
-        description,
-        date,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${req.user.clio.accessToken}`,
-        },
-      }
+      { matter: { id: matterId }, quantity: duration * 3600, description, date },
+      { headers: { Authorization: `Bearer ${req.user.clio.accessToken}` } }
     );
     res.json(response.data);
   } catch (error) {
@@ -342,9 +325,7 @@ app.post('/api/time-entry', ensureAuthenticated, async (req, res) => {
 app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
   try {
     const response = await axios.get('https://app.clio.com/api/v4/time_entries', {
-      headers: {
-        Authorization: `Bearer ${req.user.clio.accessToken}`,
-      },
+      headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
     });
     const timeEntries = response.data.data.map((entry) => ({
       id: entry.id,
@@ -360,18 +341,18 @@ app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
+  res.status(200).json({ status: 'OK', mongodbConnected: mongoose.connection.readyState === 1 });
 });
 
-// Error handling middleware
+// Error handling
 app.use((err, req, res, next) => {
   console.error('Server Error:', err.stack);
   res.status(500).json({ error: 'Server error' });
 });
 
-// Handle uncaught exceptions to prevent crashes
+// Prevent crashes
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.stack);
 });

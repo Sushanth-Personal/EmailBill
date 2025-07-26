@@ -6,7 +6,7 @@ const MongoDBStore = require('connect-mongodb-session')(session);
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const OAuth2Strategy = require('passport-oauth2').Strategy;
-const { google } = require('googleapis');
+const {google} = require('googleapis');
 const axios = require('axios');
 
 const app = express();
@@ -16,15 +16,13 @@ const store = new MongoDBStore({
   uri: process.env.MONGODB_URI,
   collection: 'sessions',
   connectionOptions: {
-    ssl: true,
-    tls: true,
-    serverSelectionTimeoutMS: 5000, // 5s timeout
+    serverSelectionTimeoutMS: 10000, // 10s timeout
     maxPoolSize: 10,
   },
 });
 
 store.on('error', function (error) {
-  console.error('Session store error:', error);
+  console.error('Session store error:', error.message);
 });
 
 // Log environment variables
@@ -33,16 +31,16 @@ console.log('Environment Variables:', {
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
   CLIO_CLIENT_ID: process.env.CLIO_CLIENT_ID,
   CLIO_REDIRECT_URI: process.env.CLIO_REDIRECT_URI,
-  FRONTEND_URL: process.env.FRONTEND_URL,
+  FRONTENDEND_URL: process.env.FRONTEND_URL,
   PORT: process.env.PORT,
   HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY ? '[SET]' : '[NOT SET]',
-  MONGODB_URI: process.env.MONGODB_URI
+  MONGODB_URI: process.env.MONGODB_URI ? '[SET]' : '[NOT SET]',
 });
 
 // Configure CORS
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL, // https://email-bill.vercel.app
+    origin: process.env.FRONTEND_URL,
     credentials: true,
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -52,7 +50,7 @@ app.use(
 // Parse JSON bodies
 app.use(express.json());
 
-// Configure session
+// Configure session with error handling
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -284,6 +282,9 @@ app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
     if (!text) {
       return res.status(400).json({ error: 'Text is required' });
     }
+    if (!process.env.HUGGINGFACE_API_KEY) {
+      return res.status(500).json({ error: 'Hugging Face API key is not configured' });
+    }
 
     const response = await axios.post(
       'https://api-inference.huggingface.co/models/facebook/bart-large-cnn',
@@ -359,10 +360,20 @@ app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
   }
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK' });
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Server Error:', err.stack);
   res.status(500).json({ error: 'Server error' });
+});
+
+// Handle uncaught exceptions to prevent crashes
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err.stack);
 });
 
 const port = process.env.PORT || 3000;

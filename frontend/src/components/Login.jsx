@@ -3,11 +3,11 @@ import { Button, Container, Typography } from '@mui/material';
 
 function Login() {
   const handleGoogleLogin = () => {
-    window.location.href = 'https://emailbill.onrender.com/auth/google';
+    window.location.href = 'http://localhost:3000/auth/google';
   };
 
   const handleClioLogin = () => {
-    window.location.href = 'https://emailbill.onrender.com/auth/clio';
+    window.location.href = 'https://localhost:3000/auth/clio';
   };
 
   return (

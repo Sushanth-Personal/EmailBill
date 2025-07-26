@@ -39,7 +39,7 @@ console.log('Environment Variables:', {
   CLIO_CLIENT_ID: process.env.CLIO_CLIENT_ID ? '[SET]' : '[NOT SET]',
   CLIO_REDIRECT_URI: process.env.CLIO_REDIRECT_URI,
   FRONTEND_URL: process.env.FRONTEND_URL,
-  PORT: process.env.PORT || '5000',
+  PORT: process.env.PORT || '3000',
   HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY ? '[SET]' : '[NOT SET]',
   MONGODB_URI: process.env.MONGODB_URI ? '[SET]' : '[NOT SET]',
   NODE_ENV: process.env.NODE_ENV,
@@ -61,8 +61,40 @@ async function initializeApp() {
     }
     console.log('Mongoose connection ready:', mongoose.connection.readyState);
 
-    // Start server after MongoDB connection
-    const port = process.env.PORT || 5000;
+    // Initialize session store
+    const store = MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      collectionName: 'sessions',
+      connectionOptions: {
+        serverSelectionTimeoutMS: 10000,
+        socketTimeoutMS: 45000,
+        connectTimeoutMS: 10000,
+      },
+    });
+
+    store.on('error', (error) => {
+      console.error('Session store error:', error.message, error.stack);
+    });
+
+    // Configure session middleware
+    app.use(
+      session({
+        secret: process.env.SESSION_SECRET,
+        resave: false,
+        saveUninitialized: false,
+        store: store,
+        cookie: {
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          maxAge: 24 * 60 * 60 * 1000, // 24 hours
+          httpOnly: true,
+          path: '/',
+        },
+      })
+    );
+
+    // Start server
+    const port = process.env.PORT || 3000;
     app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);
     });
@@ -82,32 +114,11 @@ app.use(
   })
 );
 
+// Handle CORS preflight requests
+app.options('*', cors());
+
 // Parse JSON bodies
 app.use(express.json());
-
-// Configure session
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    store: MongoStore.create({
-      mongoUrl: process.env.MONGODB_URI,
-      collectionName: 'sessions',
-      connectionOptions: {
-        serverSelectionTimeoutMS: 10000,
-        socketTimeoutMS: 45000,
-        connectTimeoutMS: 10000,
-      },
-    }),
-    cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 24 * 60 * 60 * 1000,
-      httpOnly: true,
-    },
-  })
-);
 
 // Initialize Passport
 app.use(passport.initialize());
@@ -115,11 +126,14 @@ app.use(passport.session());
 
 // Passport serialization
 passport.serializeUser((user, done) => {
-  done(null, user);
+  const userId = user.google?.profile?.id || user.clio?.profile?.id || 'temp-' + Date.now();
+  console.log('Serializing user:', { userId });
+  done(null, { id: userId, data: user });
 });
 
 passport.deserializeUser((obj, done) => {
-  done(null, obj);
+  console.log('Deserializing user:', { userId: obj.id });
+  done(null, obj.data);
 });
 
 // Merge user data
@@ -142,7 +156,7 @@ passport.use(
       passReqToCallback: true,
     },
     (req, accessToken, refreshToken, profile, done) => {
-      console.log('Google OAuth Callback:', { accessToken, refreshToken, profile });
+      console.log('Google OAuth Callback:', { accessToken, profileId: profile?.id });
       if (!accessToken || !profile) {
         return done(new Error('Invalid credentials or missing profile'));
       }
@@ -169,7 +183,7 @@ passport.use(
     },
     async (req, accessToken, refreshToken, params, profile, done) => {
       try {
-        console.log('Clio OAuth Callback:', { accessToken, refreshToken });
+        console.log('Clio OAuth Callback:', { accessToken });
         const user = { clio: { accessToken, refreshToken, profile: {} } };
         if (req.user) {
           return done(null, mergeUser(req.user, user));
@@ -186,8 +200,14 @@ passport.use(
 // Middleware to check authentication
 const ensureAuthenticated = (req, res, next) => {
   if (req.isAuthenticated()) {
+    console.log('User authenticated:', req.user.google?.profile?.id || 'No Google ID');
     return next();
   }
+  console.log('Authentication failed:', {
+    sessionID: req.sessionID,
+    session: req.session,
+    user: req.user,
+  });
   res.status(401).json({ error: 'Not authenticated' });
 };
 
@@ -208,7 +228,7 @@ app.get(
     failureMessage: true,
   }),
   (req, res) => {
-    console.log('Google OAuth callback successful:', req.user);
+    console.log('Google OAuth callback successful:', req.user.google?.profile?.id || 'No Google ID');
     res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
   }
 );
@@ -233,12 +253,9 @@ app.get('/auth/clio/callback', (req, res, next) => {
 });
 
 // User info endpoint
-app.get('/api/user', (req, res) => {
-  if (req.isAuthenticated()) {
-    res.json({ google: req.user.google || null, clio: req.user.clio || null });
-  } else {
-    res.status(401).json({ error: 'Not authenticated' });
-  }
+app.get('/api/user', ensureAuthenticated, (req, res) => {
+  console.log('Fetching /api/user for:', req.user.google?.profile?.id || 'No Google ID');
+  res.json({ google: req.user.google || null, clio: req.user.clio || null });
 });
 
 // Fetch Gmail emails
@@ -352,6 +369,24 @@ app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
     console.error('Error fetching time entries:', error.response?.data || error);
     res.status(500).json({ error: 'Failed to fetch time entries' });
   }
+});
+
+// Logout endpoint
+app.get('/auth/logout', (req, res) => {
+  console.log('Logging out user:', req.user?.google?.profile?.id || 'No Google ID');
+  req.logout((err) => {
+    if (err) {
+      console.error('Logout error:', err);
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    req.session.destroy((err) => {
+      if (err) {
+        console.error('Session destroy error:', err);
+        return res.status(500).json({ error: 'Logout failed' });
+      }
+      res.redirect(`${process.env.FRONTEND_URL}/login`);
+    });
+  });
 });
 
 // Health check

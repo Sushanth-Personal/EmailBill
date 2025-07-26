@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
+const MongoDBStore = require('connect-mongodb-session')(session); // Add MongoDB session store
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const OAuth2Strategy = require('passport-oauth2').Strategy;
@@ -10,7 +11,17 @@ const axios = require('axios');
 
 const app = express();
 
-// Log environment variables for debugging
+// MongoDB session store
+const store = new MongoDBStore({
+  uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/emailbill',
+  collection: 'sessions',
+});
+
+store.on('error', function (error) {
+  console.error('Session store error:', error);
+});
+
+// Log environment variables
 console.log('Environment Variables:', {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
@@ -18,27 +29,41 @@ console.log('Environment Variables:', {
   CLIO_REDIRECT_URI: process.env.CLIO_REDIRECT_URI,
   FRONTEND_URL: process.env.FRONTEND_URL,
   PORT: process.env.PORT,
+  HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY ? '[SET]' : '[NOT SET]',
+  MONGODB_URI: process.env.MONGODB_URI ? '[SET]' : '[NOT SET]',
 });
 
 // Configure CORS
-app.use(cors({
-  origin: [process.env.FRONTEND_URL, 'http://localhost:5173'],
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL, // https://email-bill.vercel.app
+    credentials: true,
+  })
+);
+
+// Parse JSON bodies
+app.use(express.json());
 
 // Configure session
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'your_secure_secret_key',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production' },
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: store,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production', // true in production
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // none for cross-site in prod
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  })
+);
 
 // Initialize Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Passport session serialization
+// Passport serialization
 passport.serializeUser((user, done) => {
   done(null, user);
 });
@@ -58,56 +83,67 @@ function mergeUser(existingUser, newUser) {
 }
 
 // Google OAuth Strategy
-passport.use(new GoogleStrategy({
-  clientID: process.env.GOOGLE_CLIENT_ID,
-  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: process.env.GOOGLE_REDIRECT_URI,
-  passReqToCallback: true,
-}, (req, accessToken, refreshToken, profile, done) => {
-  console.log('Google OAuth Callback:', { accessToken, refreshToken, profile });
-  if (!accessToken || !profile) {
-    return done(new Error('Invalid credentials or missing profile'));
-  }
-  const user = {
-    google: {
-      accessToken,
-      refreshToken,
-      profile,
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: process.env.GOOGLE_REDIRECT_URI,
+      passReqToCallback: true,
+    },
+    (req, accessToken, refreshToken, profile, done) => {
+      console.log('Google OAuth Callback:', { accessToken, refreshToken, profile });
+      if (!accessToken || !profile) {
+        return done(new Error('Invalid credentials or missing profile'));
+      }
+      const user = {
+        google: {
+          accessToken,
+          refreshToken,
+          profile,
+        },
+      };
+      if (req.user) {
+        return done(null, mergeUser(req.user, user));
+      }
+      return done(null, user);
     }
-  };
-  if (req.user) {
-    return done(null, mergeUser(req.user, user));
-  }
-  return done(null, user);
-}));
+  )
+);
 
 // Clio OAuth Strategy
-passport.use('clio', new OAuth2Strategy({
-  authorizationURL: 'https://app.clio.com/oauth/authorize',
-  tokenURL: 'https://app.clio.com/oauth/token',
-  clientID: process.env.CLIO_CLIENT_ID,
-  clientSecret: process.env.CLIO_CLIENT_SECRET,
-  callbackURL: process.env.CLIO_REDIRECT_URI,
-  passReqToCallback: true, // Enable req in callback
-}, async (req, accessToken, refreshToken, params, profile, done) => {
-  try {
-    console.log('Clio OAuth Callback:', { accessToken, refreshToken, params });
-    const user = {
-      clio: {
-        accessToken,
-        refreshToken,
-        profile: {}, // Fetch profile from Clio API if needed
+passport.use(
+  'clio',
+  new OAuth2Strategy(
+    {
+      authorizationURL: 'https://app.clio.com/oauth/authorize',
+      tokenURL: 'https://app.clio.com/oauth/token',
+      clientID: process.env.CLIO_CLIENT_ID,
+      clientSecret: process.env.CLIO_CLIENT_SECRET,
+      callbackURL: process.env.CLIO_REDIRECT_URI,
+      passReqToCallback: true,
+    },
+    async (req, accessToken, refreshToken, params, profile, done) => {
+      try {
+        console.log('Clio OAuth Callback:', { accessToken, refreshToken, params });
+        const user = {
+          clio: {
+            accessToken,
+            refreshToken,
+            profile: {},
+          },
+        };
+        if (req.user) {
+          return done(null, mergeUser(req.user, user));
+        }
+        return done(null, user);
+      } catch (error) {
+        console.error('Clio OAuth Callback Error:', error);
+        return done(error);
       }
-    };
-    if (req.user) {
-      return done(null, mergeUser(req.user, user));
     }
-    return done(null, user);
-  } catch (error) {
-    console.error('Clio OAuth Callback Error:', error);
-    return done(error);
-  }
-}));
+  )
+);
 
 // Middleware to check authentication
 const ensureAuthenticated = (req, res, next) => {
@@ -118,23 +154,28 @@ const ensureAuthenticated = (req, res, next) => {
 };
 
 // Routes
-app.get('/auth/google', passport.authenticate('google', {
-  scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.readonly'],
-  accessType: 'offline',
-  prompt: 'consent',
-}));
+app.get(
+  '/auth/google',
+  passport.authenticate('google', {
+    scope: ['profile', 'email', 'https://www.googleapis.com/auth/gmail.readonly'],
+    accessType: 'offline',
+    prompt: 'consent',
+  })
+);
 
-app.get('/auth/google/callback', passport.authenticate('google', {
-  failureRedirect: `${process.env.FRONTEND_URL}/dashboard?error=google_auth_failed`,
-  failureMessage: true,
-}), (req, res) => {
-  console.log('Google OAuth callback successful:', req.user);
-  res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
-});
+app.get(
+  '/auth/google/callback',
+  passport.authenticate('google', {
+    failureRedirect: `${process.env.FRONTEND_URL}/dashboard?error=google_auth_failed`,
+    failureMessage: true,
+  }),
+  (req, res) => {
+    console.log('Google OAuth callback successful:', req.user);
+    res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+  }
+);
 
-app.get('/auth/clio', passport.authenticate('clio', {
-  scope: [], // Add Clio-specific scopes if required
-}));
+app.get('/auth/clio', passport.authenticate('clio', { scope: ['read', 'write'] }));
 
 app.get('/auth/clio/callback', (req, res, next) => {
   passport.authenticate('clio', (err, user, info) => {
@@ -181,23 +222,25 @@ app.get('/api/emails', ensureAuthenticated, async (req, res) => {
     const response = await gmail.users.messages.list({ userId: 'me', maxResults: 10 });
     const messages = response.data.messages || [];
 
-    const emails = await Promise.all(messages.map(async msg => {
-      const message = await gmail.users.messages.get({ userId: 'me', id: msg.id });
-      const headers = message.data.payload.headers || [];
-      const subject = headers.find(h => h.name === 'Subject')?.value || 'No Subject';
-      const to = headers.find(h => h.name === 'To')?.value || 'Unknown';
-      const date = headers.find(h => h.name === 'Date')?.value || new Date().toISOString();
-      let body = '';
-      if (message.data.payload.parts) {
-        const textPart = message.data.payload.parts.find(part => part.mimeType === 'text/plain');
-        if (textPart && textPart.body.data) {
-          body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+    const emails = await Promise.all(
+      messages.map(async (msg) => {
+        const message = await gmail.users.messages.get({ userId: 'me', id: msg.id });
+        const headers = message.data.payload.headers || [];
+        const subject = headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
+        const to = headers.find((h) => h.name === 'To')?.value || 'Unknown';
+        const date = headers.find((h) => h.name === 'Date')?.value || new Date().toISOString();
+        let body = '';
+        if (message.data.payload.parts) {
+          const textPart = message.data.payload.parts.find((part) => part.mimeType === 'text/plain');
+          if (textPart && textPart.body.data) {
+            body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+          }
+        } else if (message.data.payload.body.data) {
+          body = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
         }
-      } else if (message.data.payload.body.data) {
-        body = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
-      }
-      return { id: msg.id, subject, to, date, body };
-    }));
+        return { id: msg.id, subject, to, date, body };
+      })
+    );
 
     res.json(emails);
   } catch (error) {
@@ -214,7 +257,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
         Authorization: `Bearer ${req.user.clio.accessToken}`,
       },
     });
-    const matters = response.data.data.map(matter => ({
+    const matters = response.data.data.map((matter) => ({
       id: matter.id,
       clientEmail: matter.client?.email || '',
     }));
@@ -225,15 +268,37 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Summarize email content
+// Summarize email content with Hugging Face BERT
 app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
   try {
     const { text } = req.body;
-    const summary = text.substring(0, 100) + '...'; // Replace with actual summarization
-    const duration = 0.5; // Example duration in hours
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const response = await axios.post(
+      'https://api-inference.huggingface.co/models/facebook/bart-large-cnn',
+      {
+        inputs: text,
+        parameters: {
+          max_length: 100,
+          min_length: 30,
+          do_sample: false,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    const summary = response.data[0]?.summary_text || 'Summary not generated.';
+    const duration = summary.length / 1000 + 0.5; // Example duration
     res.json({ summary, duration });
   } catch (error) {
-    console.error('Error summarizing:', error);
+    console.error('Error summarizing:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to summarize' });
   }
 });
@@ -242,20 +307,46 @@ app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
 app.post('/api/time-entry', ensureAuthenticated, async (req, res) => {
   try {
     const { matterId, duration, description, date } = req.body;
-    const response = await axios.post('https://app.clio.com/api/v4/time_entries', {
-      matter: { id: matterId },
-      quantity: duration * 3600, // Convert hours to seconds
-      description,
-      date,
-    }, {
-      headers: {
-        Authorization: `Bearer ${req.user.clio.accessToken}`,
+    const response = await axios.post(
+      'https://app.clio.com/api/v4/time_entries',
+      {
+        matter: { id: matterId },
+        quantity: duration * 3600,
+        description,
+        date,
       },
-    });
+      {
+        headers: {
+          Authorization: `Bearer ${req.user.clio.accessToken}`,
+        },
+      }
+    );
     res.json(response.data);
   } catch (error) {
     console.error('Error creating time entry:', error.response?.data || error);
     res.status(500).json({ error: 'Failed to create time entry' });
+  }
+});
+
+// Fetch Clio time entries
+app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
+  try {
+    const response = await axios.get('https://app.clio.com/api/v4/time_entries', {
+      headers: {
+        Authorization: `Bearer ${req.user.clio.accessToken}`,
+      },
+    });
+    const timeEntries = response.data.data.map((entry) => ({
+      id: entry.id,
+      description: entry.description,
+      date: entry.date,
+      duration: entry.quantity / 3600,
+      matterId: entry.matter?.id,
+    }));
+    res.json(timeEntries);
+  } catch (error) {
+    console.error('Error fetching time entries:', error.response?.data || error);
+    res.status(500).json({ error: 'Failed to fetch time entries' });
   }
 });
 
@@ -265,7 +356,7 @@ app.use((err, req, res, next) => {
   res.status(500).redirect(`${process.env.FRONTEND_URL}/dashboard?error=server_error`);
 });
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });

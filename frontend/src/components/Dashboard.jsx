@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom';
-import styles from './Dashboard.module.css'; // Import CSS Module
+import styles from './Dashboard.module.css';
 
 function Dashboard() {
   const [user, setUser] = useState(null);
@@ -11,7 +11,7 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const location = useLocation();
-  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+  const backendUrl = process.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
   useEffect(() => {
     const urlParams = new URLSearchParams(location.search);
@@ -77,19 +77,27 @@ function Dashboard() {
 
   const handleSummarizeAndBill = async (email) => {
     try {
-      const matter = matters.find(m => m.clientEmail?.toLowerCase() === email.to?.toLowerCase());
+      const matter = matters.find((m) => m.clientEmail?.toLowerCase() === email.to?.toLowerCase());
       if (!matter) {
         setError(`No matching matter found for email: ${email.to}`);
         return;
       }
-      const summaryResponse = await axios.post(`${backendUrl}/api/summarize`, { text: email.body }, { withCredentials: true });
+      const summaryResponse = await axios.post(
+        `${backendUrl}/api/summarize`,
+        { text: email.body },
+        { withCredentials: true }
+      );
       const { summary, duration } = summaryResponse.data;
-      const timeEntryResponse = await axios.post(`${backendUrl}/api/time-entry`, {
-        matterId: matter.id,
-        duration,
-        description: summary,
-        date: email.date,
-      }, { withCredentials: true });
+      const timeEntryResponse = await axios.post(
+        `${backendUrl}/api/time-entry`,
+        {
+          matterId: matter.id,
+          duration,
+          description: summary,
+          date: email.date,
+        },
+        { withCredentials: true }
+      );
       setSuccess(`Time entry created for ${email.to}: ${timeEntryResponse.data.data.description}`);
       setTimeEntries([...timeEntries, timeEntryResponse.data.data]);
       setError(null);
@@ -126,7 +134,10 @@ function Dashboard() {
                       </p>
                       <p>{email.body.substring(0, 100) + '...'}</p>
                     </div>
-                    <button className={styles.button} onClick={() => handleSummarizeAndBill(email)}>
+                    <button
+                      className={styles.button}
+                      onClick={() => handleSummarizeAndBill(email)}
+                    >
                       Convert to Billable
                     </button>
                   </li>

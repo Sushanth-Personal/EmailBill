@@ -6,26 +6,26 @@ function Dashboard() {
   const [emails, setEmails] = useState([]);
   const [matters, setMatters] = useState([]);
 
-  useEffect(() => {
-    const fetchEmails = async () => {
-      try {
-        const response = await axios.get('https://emailbill.onrender.com/api/emails', { withCredentials: true });
-        setEmails(response.data);
-      } catch (error) {
-        console.error('Error fetching emails:', error);
-      }
-    };
-    const fetchMatters = async () => {
-      try {
-        const response = await axios.get('https://emailbill.onrender.com/api/matters', { withCredentials: true });
-        setMatters(response.data);
-      } catch (error) {
-        console.error('Error fetching matters:', error);
-      }
-    };
-    fetchEmails();
-    fetchMatters();
-  }, []);
+  // useEffect(() => {
+  //   const fetchEmails = async () => {
+  //     try {
+  //       const response = await axios.get('https://emailbill.onrender.com/api/emails', { withCredentials: true });
+  //       setEmails(response.data);
+  //     } catch (error) {
+  //       console.error('Error fetching emails:', error);
+  //     }
+  //   };
+  //   const fetchMatters = async () => {
+  //     try {
+  //       const response = await axios.get('https://emailbill.onrender.com/api/matters', { withCredentials: true });
+  //       setMatters(response.data);
+  //     } catch (error) {
+  //       console.error('Error fetching matters:', error);
+  //     }
+  //   };
+  //   fetchEmails();
+  //   fetchMatters();
+  // }, []);
 
   const handleSummarizeAndBill = async (email) => {
     try {
@@ -58,7 +58,7 @@ function Dashboard() {
       <Typography variant="h4" gutterBottom>
         EmailBill - Dashboard
       </Typography>
-      <List>
+      {/* <List>
         {emails.map((email) => (
           <ListItem key={email.id}>
             <ListItemText
@@ -74,7 +74,7 @@ function Dashboard() {
             </Button>
           </ListItem>
         ))}
-      </List>
+      </List> */}
     </Container>
   );
 }

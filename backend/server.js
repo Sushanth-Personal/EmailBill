@@ -11,48 +11,25 @@ const axios = require('axios');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 
-// Initialize app
 const app = express();
 
-// Connect to MongoDB
-connectDB();
-
 // Validate environment variables
-if (!process.env.SESSION_SECRET) {
-  console.error('Error: SESSION_SECRET is not defined');
-  process.exit(1);
-}
-if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-  console.error('Error: Google OAuth environment variables are missing');
-  process.exit(1);
-}
-if (!process.env.CLIO_CLIENT_ID || !process.env.CLIO_CLIENT_SECRET || !process.env.CLIO_REDIRECT_URI) {
-  console.error('Error: Clio OAuth environment variables are missing');
-  process.exit(1);
-}
-if (!process.env.FRONTEND_URL) {
-  console.error('Error: FRONTEND_URL is not defined');
-  process.exit(1);
-}
-if (!process.env.MONGODB_URI) {
-  console.error('Error: MONGODB_URI is not defined');
-  process.exit(1);
-}
-
-// MongoDB session store using Mongoose connection
-let store;
-try {
-  store = new MongoDBStore({
-    mongooseConnection: mongoose.connection, // Use Mongoose's connection
-    collection: 'sessions',
-  });
-  store.on('error', (error) => {
-    console.error('Session store error:', error.message);
-  });
-} catch (error) {
-  console.error('Failed to initialize MongoDB session store:', error.message);
-  store = new session.MemoryStore();
-  console.warn('Using in-memory session store as fallback (not suitable for production)');
+const requiredEnvVars = [
+  'SESSION_SECRET',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_REDIRECT_URI',
+  'CLIO_CLIENT_ID',
+  'CLIO_CLIENT_SECRET',
+  'CLIO_REDIRECT_URI',
+  'FRONTEND_URL',
+  'MONGODB_URI',
+];
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`Error: ${envVar} is not defined`);
+    process.exit(1);
+  }
 }
 
 // Log environment variables
@@ -67,6 +44,54 @@ console.log('Environment Variables:', {
   MONGODB_URI: process.env.MONGODB_URI ? '[SET]' : '[NOT SET]',
   NODE_ENV: process.env.NODE_ENV,
 });
+
+// Initialize MongoDB and session store
+let store;
+async function initializeApp() {
+  try {
+    // Connect to MongoDB
+    await connectDB();
+
+    // Wait for Mongoose connection to be fully established
+    if (mongoose.connection.readyState !== 1) {
+      await new Promise((resolve, reject) => {
+        mongoose.connection.once('connected', resolve);
+        mongoose.connection.once('error', reject);
+      });
+    }
+
+    // Initialize MongoDB session store
+    store = new MongoDBStore({
+      mongooseConnection: mongoose.connection,
+      collection: 'sessions',
+    });
+
+    store.on('error', (error) => {
+      console.error('Session store error:', error.message);
+    });
+
+    // Verify session store connection
+    await new Promise((resolve, reject) => {
+      store.once('connected', () => {
+        console.log('MongoDB session store connected');
+        resolve();
+      });
+      store.once('error', (error) => {
+        console.error('Session store initialization error:', error.message);
+        reject(error);
+      });
+    });
+  } catch (error) {
+    console.error('Failed to initialize MongoDB session store:', error.message);
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Production environment requires MongoDB session store. Exiting.');
+      process.exit(1);
+    } else {
+      console.warn('Using in-memory session store as fallback (not suitable for production)');
+      store = new session.MemoryStore();
+    }
+  }
+}
 
 // Configure CORS
 app.use(
@@ -358,7 +383,15 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.stack);
 });
 
-const port = process.env.PORT || 5000;
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
-});
+// Start server after initialization
+initializeApp()
+  .then(() => {
+    const port = process.env.PORT || 5000;
+    app.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to initialize app:', err);
+    process.exit(1);
+  });

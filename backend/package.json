@@ -21,6 +21,7 @@
     "express-session": "^1.18.2",
     "googleapis": "^154.0.0",
     "mongodb": "^6.18.0",
+    "mongoose": "^8.16.5",
     "morgan": "^1.10.0",
     "nodemon": "^3.1.10",
     "passport": "^0.7.0",

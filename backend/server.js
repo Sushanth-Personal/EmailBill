@@ -9,7 +9,7 @@ const OAuth2Strategy = require('passport-oauth2').Strategy;
 const { google } = require('googleapis');
 const axios = require('axios');
 const mongoose = require('mongoose');
-const connectDB = require('./db');
+const connectDB = require('./config/db');
 
 // Initialize app
 const app = express();

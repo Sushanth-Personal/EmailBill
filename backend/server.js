@@ -34,15 +34,16 @@ if (!process.env.FRONTEND_URL) {
   console.error('Error: FRONTEND_URL is not defined');
   process.exit(1);
 }
+if (!process.env.MONGODB_URI) {
+  console.error('Error: MONGODB_URI is not defined');
+  process.exit(1);
+}
 
-// MongoDB session store
+// MongoDB session store using Mongoose connection
 let store;
 try {
-  if (!process.env.MONGODB_URI) {
-    throw new Error('MONGODB_URI is not defined');
-  }
   store = new MongoDBStore({
-    mongooseConnection: mongoose.connection, // Use Mongoose connection
+    mongooseConnection: mongoose.connection, // Use Mongoose's connection
     collection: 'sessions',
   });
   store.on('error', (error) => {
@@ -357,7 +358,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.stack);
 });
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`);
 });

@@ -2,12 +2,13 @@ import React from 'react';
 import { Button, Container, Typography } from '@mui/material';
 
 function Login() {
+  const backendUrl = process.VITE_API_BASE_URL || 'http://localhost:3000';
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:3000/auth/google';
+    window.location.href = `${backendUrl}/auth/google`;
   };
 
   const handleClioLogin = () => {
-    window.location.href = 'https://emailbill.onrender.com/auth/clio';
+    window.location.href = `${backendUrl}/auth/clio`;
   };
 
   return (

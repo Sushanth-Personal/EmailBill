@@ -11,7 +11,7 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const location = useLocation();
-  const backendUrl = process.env.VITE_API_BASE_URL || 'http://localhost:5000';
+  const backendUrl = process.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   useEffect(() => {
     const urlParams = new URLSearchParams(location.search);

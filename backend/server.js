@@ -457,6 +457,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
               headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
               params: { fields: 'email' }
             });
+            console.log(contactResponse);
             clientEmail = contactResponse.data.data.email || '';
           } catch (contactError) {
             console.error('Error fetching contact email:', {

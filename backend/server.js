@@ -475,7 +475,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
           description: matter.description || '',
           clientId: matter.client?.id || '',
           clientName: matter.client?.name || '',
-          clientEmail:matter.client || ''
+          clientEmail:matter || ''
         };
       })
     );

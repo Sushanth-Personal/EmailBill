@@ -443,7 +443,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
 
     console.log('Clio matters response:', {
       status: mattersResponse.status,
-      data: mattersResponse.data.data.client,
+      data: mattersResponse.data.data,
       dataCount: mattersResponse.data.data?.length || 0,
       meta: mattersResponse.data.meta,
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
@@ -475,7 +475,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
           description: matter.description || '',
           clientId: matter.client?.id || '',
           clientName: matter.client?.name || '',
-          clientEmail
+          clientEmail:matter.client?.primary_email_address || ''
         };
       })
     );

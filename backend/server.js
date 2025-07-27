@@ -457,7 +457,6 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
           try {
             const contactResponse = await axios.get(`https://app.clio.com/api/v4/contacts/${matter.client.id}.json`, {
               headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
-              params: { fields: 'email' }
             });
             console.log('contactResponse',contactResponse);
             clientEmail = contactResponse.data.data.email || '';
@@ -477,7 +476,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
           clientId: matter.client?.id || '',
           clientName: matter.client?.name || '',
           clientEmail:matter || '',
-          clientEmail:clientEmail || ''
+          clientEmail:mattersResponse || ''
         };
       })
     );

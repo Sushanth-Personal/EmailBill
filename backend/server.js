@@ -432,28 +432,51 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
       throw new Error('Missing Clio access token');
     }
 
-    const endpoint = 'https://app.clio.com/api/v4/matters.json'; // Use .json
-    const response = await axios.get(endpoint, {
+    const endpoint = 'https://app.clio.com/api/v4/matters.json';
+    const mattersResponse = await axios.get(endpoint, {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
       params: {
-        fields: 'id,display_number,description,client{name,email}',
+        fields: 'id,display_number,description,client{id,name}',
         query: '00001-Wide' // Filter for Think Wide matter
       }
     });
 
     console.log('Clio matters response:', {
-      status: response.status,
-      dataCount: response.data.data?.length || 0,
-      meta: response.data.meta,
+      status: mattersResponse.status,
+      dataCount: mattersResponse.data.data?.length || 0,
+      meta: mattersResponse.data.meta,
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     });
 
-    const matters = response.data.data.map((matter) => ({
-      id: matter.id,
-      displayNumber: matter.display_number,
-      description: matter.description || '',
-      clientEmail: matter.client?.email || ''
-    }));
+    const matters = await Promise.all(
+      mattersResponse.data.data.map(async (matter) => {
+        let clientEmail = '';
+        if (matter.client?.id) {
+          try {
+            const contactResponse = await axios.get(`https://app.clio.com/api/v4/contacts/${matter.client.id}.json`, {
+              headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
+              params: { fields: 'email' }
+            });
+            clientEmail = contactResponse.data.data.email || '';
+          } catch (contactError) {
+            console.error('Error fetching contact email:', {
+              message: contactError.message,
+              code: contactError.code,
+              response: contactError.response?.data,
+              timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+            });
+          }
+        }
+        return {
+          id: matter.id,
+          displayNumber: matter.display_number,
+          description: matter.description || '',
+          clientId: matter.client?.id || '',
+          clientName: matter.client?.name || '',
+          clientEmail
+        };
+      })
+    );
 
     res.json(matters);
   } catch (error) {
@@ -470,7 +493,6 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
     });
   }
 });
-
 // Summarize email
 app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
   try {

@@ -443,7 +443,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
 
     console.log('Clio matters response:', {
       status: mattersResponse.status,
-      data: mattersResponse.data,
+      data: mattersResponse.data.data.entries(),
       dataCount: mattersResponse.data.data?.length || 0,
       meta: mattersResponse.data.meta,
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })

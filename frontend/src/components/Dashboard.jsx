@@ -10,6 +10,9 @@ function Dashboard() {
   const [timeEntries, setTimeEntries] = useState([]);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [selectedMatterId, setSelectedMatterId] = useState('');
+  const [duration, setDuration] = useState('');
+  const [description, setDescription] = useState('');
   const location = useLocation();
   const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
@@ -48,7 +51,7 @@ function Dashboard() {
       const fetchMatters = async () => {
         try {
           const response = await axios.get(`${backendUrl}/api/matters`, { withCredentials: true });
-          console.log("Matter response",response);
+          console.log('Matter response:', response);
           setMatters(response.data);
         } catch (err) {
           setError('Failed to fetch matters.');
@@ -58,7 +61,7 @@ function Dashboard() {
 
       const fetchTimeEntries = async () => {
         try {
-          const response = await axios.get(`${backendUrl}/api/log-time`, { withCredentials: true });
+          const response = await axios.get(`${backendUrl}/api/time-entries`, { withCredentials: true });
           setTimeEntries(response.data);
         } catch (err) {
           setError('Failed to fetch time entries.');
@@ -68,7 +71,7 @@ function Dashboard() {
 
       fetchEmails();
       fetchMatters();
-      // fetchTimeEntries();
+      fetchTimeEntries();
     }
   }, [user, backendUrl]);
 
@@ -76,32 +79,28 @@ function Dashboard() {
     window.location.href = `${backendUrl}/auth/clio`;
   };
 
-  const handleSummarizeAndBill = async (email) => {
+  const handleLogTime = async (e) => {
+    e.preventDefault();
     try {
-      const matter = matters.find((m) => m.clientEmail?.toLowerCase() === email.to?.toLowerCase());
-      if (!matter) {
-        setError(`No matching matter found for email: ${email.to}`);
+      if (!selectedMatterId || !duration) {
+        setError('Please select a matter and enter a duration.');
         return;
       }
-      const summaryResponse = await axios.post(
-        `${backendUrl}/api/summarize`,
-        { text: email.body },
-        { withCredentials: true }
-      );
-      const { summary, duration } = summaryResponse.data;
-      const timeEntryResponse = await axios.post(
-        `${backendUrl}/api/time-entry`,
+      const response = await axios.post(
+        `${backendUrl}/api/log-time`,
         {
-          matterId: matter.id,
-          duration,
-          description: summary,
-          date: email.date,
+          matterId: selectedMatterId,
+          duration: parseFloat(duration),
+          description: description || 'Billable activity for matter'
         },
         { withCredentials: true }
       );
-      setSuccess(`Time entry created for ${email.to}: ${timeEntryResponse.data.data.description}`);
-      setTimeEntries([...timeEntries, timeEntryResponse.data.data]);
+      setSuccess(`Time entry created for Matter ID ${selectedMatterId}: ${response.data.timeEntry.description}`);
+      setTimeEntries([...timeEntries, response.data.timeEntry]);
       setError(null);
+      setDuration('');
+      setDescription('');
+      setSelectedMatterId('');
     } catch (error) {
       setError('Failed to create time entry.');
       console.error('Time entry error:', error);
@@ -122,28 +121,70 @@ function Dashboard() {
               Connect with Clio
             </button>
           )}
-          {user.google && user.clio && emails.length > 0 ? (
+          {user.google && user.clio ? (
             <>
+              <h2>Log Time Entry</h2>
+              <form onSubmit={handleLogTime} className={styles.form}>
+                <label>
+                  Select Matter:
+                  <select
+                    value={selectedMatterId}
+                    onChange={(e) => setSelectedMatterId(e.target.value)}
+                    className={styles.select}
+                  >
+                    <option value="">Select a matter</option>
+                    {matters.map((matter) => (
+                      <option key={matter.id} value={matter.id}>
+                        {matter.displayNumber} (ID: {matter.id})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Duration (hours):
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={duration}
+                    onChange={(e) => setDuration(e.target.value)}
+                    className={styles.input}
+                    placeholder="e.g., 1.0"
+                  />
+                </label>
+                <label>
+                  Description:
+                  <input
+                    type="text"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className={styles.input}
+                    placeholder="Enter description"
+                  />
+                </label>
+                <button type="submit" className={styles.button}>
+                  Log Time
+                </button>
+              </form>
+
               <h2>Emails</h2>
               <ul className={styles.emailList}>
-                {emails.map((email, index) => (
-                  <li key={email.id || index} className={styles.emailItem}>
-                    <div className={styles.emailText}>
-                      <strong>{email.subject}</strong>
-                      <p>
-                        To: {email.to} | Date: {new Date(email.date).toLocaleString()}
-                      </p>
-                      <p>{email.body.substring(0, 100) + '...'}</p>
-                    </div>
-                    <button
-                      className={styles.button}
-                      onClick={() => handleSummarizeAndBill(email)}
-                    >
-                      Convert to Billable
-                    </button>
-                  </li>
-                ))}
+                {emails.length > 0 ? (
+                  emails.map((email, index) => (
+                    <li key={email.id || index} className={styles.emailItem}>
+                      <div className={styles.emailText}>
+                        <strong>{email.subject}</strong>
+                        <p>
+                          To: {email.to} | Date: {new Date(email.date).toLocaleString()}
+                        </p>
+                        <p>{email.body.substring(0, 100) + '...'}</p>
+                      </div>
+                    </li>
+                  ))
+                ) : (
+                  <p>No emails to display.</p>
+                )}
               </ul>
+
               <h2>Recent Time Entries</h2>
               <ul className={styles.timeEntryList}>
                 {timeEntries.length > 0 ? (
@@ -161,7 +202,7 @@ function Dashboard() {
               </ul>
             </>
           ) : (
-            <p>No emails to display. Ensure Google and Clio are connected.</p>
+            <p>No data to display. Ensure Google and Clio are connected.</p>
           )}
         </>
       ) : (

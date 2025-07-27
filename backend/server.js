@@ -494,7 +494,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
 });
 
 app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
-  const { emailId, duration, description } = req.body; // emailId from /api/emails, duration in hours
+  const { matterId, duration, description } = req.body; // matterId from request, duration in hours
   try {
     console.log('Logging time entry for user:', req.user.google?.profile?.id);
     console.log('Clio Access Token:', req.user.clio?.accessToken || '[NOT SET]');
@@ -504,29 +504,33 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
       throw new Error('Missing Clio access token');
     }
 
-    // Fetch Think Wide matter to get matter.id
+    if (!matterId) {
+      throw new Error('Matter ID is required');
+    }
+
+    // Validate matterId exists
     const matterResponse = await axios.get('https://app.clio.com/api/v4/matters.json', {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
-      params: { fields: 'id,display_number,client{id}', query: '00001-Wide' }
+      params: { fields: 'id,display_number', query: `id:${matterId}` }
     });
 
     if (!matterResponse.data.data || matterResponse.data.data.length === 0) {
-      throw new Error('Think Wide matter (00001-Wide) not found');
+      throw new Error(`Matter with ID ${matterId} not found`);
     }
 
-    const matterId = matterResponse.data.data[0].id;
-    console.log('Think Wide matter ID:', matterId);
+    const validatedMatterId = matterResponse.data.data[0].id;
+    console.log('Validated Matter ID:', validatedMatterId);
 
     // Create time entry via /activities.json
     const activityResponse = await axios.post(
       'https://app.clio.com/api/v4/activities.json',
       {
         type: 'TimeEntry',
-        matter: { id: matterId },
+        matter: { id: validatedMatterId },
         quantity: parseFloat(duration), // Duration in hours (e.g., 1.0)
-        description: description || 'Email correspondence with Think Wide',
+        description: description || 'Billable activity for matter',
         date: new Date().toISOString().split('T')[0], // Today's date: 2025-07-27
-        note: `Associated with email ID: ${emailId}, sent at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+        note: `Logged at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
         non_billable: false // Mark as billable
       },
       { headers: { Authorization: `Bearer ${req.user.clio.accessToken}` } }
@@ -534,7 +538,7 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
 
     console.log('Time entry created:', {
       id: activityResponse.data.data.id,
-      matterId,
+      matterId: validatedMatterId,
       duration,
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     });
@@ -543,7 +547,7 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
       success: true,
       timeEntry: {
         id: activityResponse.data.data.id,
-        matterId,
+        matterId: validatedMatterId,
         duration,
         description,
         date: activityResponse.data.data.date

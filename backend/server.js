@@ -426,12 +426,13 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
     console.log('Fetching matters for user:', req.user.google?.profile?.id);
     console.log('Clio Access Token:', req.user.clio?.accessToken || '[NOT SET]');
     console.log('Clio Refresh Token:', req.user.clio?.refreshToken ? '[SET]' : '[NOT SET]');
+    console.log('Timestamp:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
 
     if (!req.user.clio || !req.user.clio.accessToken) {
       throw new Error('Missing Clio access token');
     }
 
-    const endpoint = 'https://app.clio.com/api/v4/matters.json'; // Update to au.app.clio.com if needed
+    const endpoint = 'https://app.clio.com/api/v4/matters.json'; // Use .json
     const response = await axios.get(endpoint, {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
       params: {

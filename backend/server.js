@@ -425,7 +425,6 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   try {
     console.log('Fetching matters for user:', req.user.google?.profile?.id);
     console.log('Clio Access Token:', req.user.clio?.accessToken || '[NOT SET]');
-    console.log('Clio Refresh Token:', req.user.clio?.refreshToken ? '[SET]' : '[NOT SET]');
     console.log('Timestamp:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
 
     if (!req.user.clio || !req.user.clio.accessToken) {
@@ -437,13 +436,12 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
       params: {
         fields: 'id,display_number,description,client{id,name}',
-        query: '00001-Wide' // Filter for Think Wide matter
+        query: '00001-Wide'
       }
     });
 
     console.log('Clio matters response:', {
       status: mattersResponse.status,
-      data: mattersResponse.data.data,
       dataCount: mattersResponse.data.data?.length || 0,
       meta: mattersResponse.data.meta,
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
@@ -453,12 +451,11 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
       mattersResponse.data.data.map(async (matter) => {
         let clientEmail = '';
         if (matter.client?.id) {
-          console.log('This is client ID',matter.client.id);
           try {
             const contactResponse = await axios.get(`https://app.clio.com/api/v4/contacts/${matter.client.id}.json`, {
               headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
+              params: { fields: 'email' }
             });
-            console.log('contactResponse',contactResponse);
             clientEmail = contactResponse.data.data.email || '';
           } catch (contactError) {
             console.error('Error fetching contact email:', {
@@ -475,8 +472,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
           description: matter.description || '',
           clientId: matter.client?.id || '',
           clientName: matter.client?.name || '',
-          clientEmail:matter || '',
-          clientEmail:mattersResponse || ''
+          clientEmail
         };
       })
     );
@@ -496,6 +492,78 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
     });
   }
 });
+
+app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
+  const { emailId, duration, description } = req.body; // emailId from /api/emails, duration in hours
+  try {
+    console.log('Logging time entry for user:', req.user.google?.profile?.id);
+    console.log('Clio Access Token:', req.user.clio?.accessToken || '[NOT SET]');
+    console.log('Timestamp:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+
+    if (!req.user.clio || !req.user.clio.accessToken) {
+      throw new Error('Missing Clio access token');
+    }
+
+    // Fetch Think Wide matter to get matter.id
+    const matterResponse = await axios.get('https://app.clio.com/api/v4/matters.json', {
+      headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
+      params: { fields: 'id,display_number,client{id}', query: '00001-Wide' }
+    });
+
+    if (!matterResponse.data.data || matterResponse.data.data.length === 0) {
+      throw new Error('Think Wide matter (00001-Wide) not found');
+    }
+
+    const matterId = matterResponse.data.data[0].id;
+    console.log('Think Wide matter ID:', matterId);
+
+    // Create time entry via /activities.json
+    const activityResponse = await axios.post(
+      'https://app.clio.com/api/v4/activities.json',
+      {
+        type: 'TimeEntry',
+        matter: { id: matterId },
+        quantity: parseFloat(duration), // Duration in hours (e.g., 1.0)
+        description: description || 'Email correspondence with Think Wide',
+        date: new Date().toISOString().split('T')[0], // Today's date: 2025-07-27
+        note: `Associated with email ID: ${emailId}, sent at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+        non_billable: false // Mark as billable
+      },
+      { headers: { Authorization: `Bearer ${req.user.clio.accessToken}` } }
+    );
+
+    console.log('Time entry created:', {
+      id: activityResponse.data.data.id,
+      matterId,
+      duration,
+      timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+    });
+
+    res.json({
+      success: true,
+      timeEntry: {
+        id: activityResponse.data.data.id,
+        matterId,
+        duration,
+        description,
+        date: activityResponse.data.data.date
+      }
+    });
+  } catch (error) {
+    console.error('Error logging time entry:', {
+      message: error.message,
+      code: error.code,
+      response: error.response?.data,
+      status: error.response?.status,
+      timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+    });
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to log time entry',
+      details: error.response?.data?.error || error.message
+    });
+  }
+});
+
 // Summarize email
 app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
   try {

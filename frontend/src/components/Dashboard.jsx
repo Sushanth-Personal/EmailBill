@@ -58,7 +58,7 @@ function Dashboard() {
 
       const fetchTimeEntries = async () => {
         try {
-          const response = await axios.get(`${backendUrl}/api/time-entries`, { withCredentials: true });
+          const response = await axios.get(`${backendUrl}/api/log-time`, { withCredentials: true });
           setTimeEntries(response.data);
         } catch (err) {
           setError('Failed to fetch time entries.');

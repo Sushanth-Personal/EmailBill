@@ -13,6 +13,9 @@ const connectDB = require('./config/db');
 
 const app = express();
 
+// Trust proxy for production (e.g., Render)
+app.set('trust proxy', 1); // Add this to handle reverse proxy
+
 // Validate environment variables
 const requiredEnvVars = [
   'SESSION_SECRET',
@@ -81,25 +84,36 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
+app.options('*', cors()); // Handle preflight requests
 
 // Parse JSON bodies
 app.use(express.json());
 
 // Configure session
+const sessionStore = MongoStore.create({
+  mongoUrl: process.env.MONGODB_URI,
+  collectionName: 'sessions',
+  connectionOptions: {
+    serverSelectionTimeoutMS: 30000,
+    socketTimeoutMS: 60000,
+    connectTimeoutMS: 30000,
+  },
+});
+
+sessionStore.on('error', (error) => {
+  console.error('MongoDB session store error:', error);
+});
+
+sessionStore.on('connected', () => {
+  console.log('MongoDB session store connected successfully');
+});
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({
-      mongoUrl: process.env.MONGODB_URI,
-      collectionName: 'sessions',
-      connectionOptions: {
-        serverSelectionTimeoutMS: 10000,
-        socketTimeoutMS: 45000,
-        connectTimeoutMS: 10000,
-      },
-    }),
+    store: sessionStore,
     cookie: {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
@@ -113,12 +127,23 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Debug middleware for session and cookies
+app.use((req, res, next) => {
+  console.log('Request URL:', req.url);
+  console.log('Request Cookies:', req.headers.cookie);
+  console.log('Session ID:', req.sessionID);
+  console.log('Session:', req.session);
+  next();
+});
+
 // Passport serialization
 passport.serializeUser((user, done) => {
+  console.log('Serializing user:', user);
   done(null, user);
 });
 
 passport.deserializeUser((obj, done) => {
+  console.log('Deserializing user:', obj);
   done(null, obj);
 });
 
@@ -142,11 +167,17 @@ passport.use(
       passReqToCallback: true,
     },
     (req, accessToken, refreshToken, profile, done) => {
-      console.log('Google OAuth Callback:', { accessToken, refreshToken, profile });
+      console.log('Google OAuth Callback:', {
+        accessToken,
+        refreshToken,
+        profile: profile ? profile.id : null,
+        existingUser: req.user,
+      });
       if (!accessToken || !profile) {
         return done(new Error('Invalid credentials or missing profile'));
       }
       const user = { google: { accessToken, refreshToken, profile } };
+      req.session.user = user; // Force session modification
       if (req.user) {
         return done(null, mergeUser(req.user, user));
       }
@@ -171,6 +202,7 @@ passport.use(
       try {
         console.log('Clio OAuth Callback:', { accessToken, refreshToken });
         const user = { clio: { accessToken, refreshToken, profile: {} } };
+        req.session.user = user; // Force session modification
         if (req.user) {
           return done(null, mergeUser(req.user, user));
         }
@@ -185,6 +217,10 @@ passport.use(
 
 // Middleware to check authentication
 const ensureAuthenticated = (req, res, next) => {
+  console.log('ensureAuthenticated - Session ID:', req.sessionID);
+  console.log('ensureAuthenticated - Session:', req.session);
+  console.log('ensureAuthenticated - User:', req.user);
+  console.log('ensureAuthenticated - isAuthenticated:', req.isAuthenticated());
   if (req.isAuthenticated()) {
     return next();
   }
@@ -207,9 +243,22 @@ app.get(
     failureRedirect: `${process.env.FRONTEND_URL}/dashboard?error=google_auth_failed`,
     failureMessage: true,
   }),
-  (req, res) => {
-    console.log('Google OAuth callback successful:', req.user);
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+  (req, res, next) => {
+    console.log('Google OAuth callback - Session ID:', req.sessionID);
+    console.log('Google OAuth callback - User:', req.user);
+    console.log('Google OAuth callback - Session before save:', req.session);
+    req.session.user = req.user; // Force session modification
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        return res.redirect(`${process.env.FRONTEND_URL}/dashboard?error=session_save_failed`);
+      }
+      console.log('Session saved successfully:', req.sessionID);
+      console.log('Set-Cookie header:', res.get('Set-Cookie'));
+      res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+    });
   }
 );
 
@@ -226,14 +275,50 @@ app.get('/auth/clio/callback', (req, res, next) => {
         console.error('Clio Login Error:', loginErr);
         return res.redirect(`${process.env.FRONTEND_URL}/dashboard?error=clio_auth_failed`);
       }
-      console.log('Clio OAuth callback successful:', user);
-      return res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+      console.log('Clio OAuth callback - Session ID:', req.sessionID);
+      console.log('Clio OAuth callback - User:', user);
+      console.log('Clio OAuth callback - Session before save:', req.session);
+      req.session.user = user; // Force session modification
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.redirect(`${process.env.FRONTEND_URL}/dashboard?error=session_save_failed`);
+        }
+        console.log('Session saved successfully:', req.sessionID);
+        console.log('Set-Cookie header:', res.get('Set-Cookie'));
+        res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+      });
     });
   })(req, res, next);
 });
 
-// User info endpoint
+// Test session endpoint
+app.get('/api/test-session', (req, res) => {
+  console.log('Test session - Session ID:', req.sessionID);
+  console.log('Test session - Existing session:', req.session);
+  req.session.test = 'test-value'; // Force session modification
+  req.session.save((err) => {
+    if (err) {
+      console.error('Test session save error:', err);
+      return res.status(500).json({ error: 'Failed to save session' });
+    }
+    console.log('Test session saved');
+    console.log('Test session - Set-Cookie:', res.get('Set-Cookie'));
+    res.json({ sessionID: req.sessionID, test: req.session.test });
+  });
+});
 
+// Check session endpoint
+app.get('/api/check-session', (req, res) => {
+  console.log('Check session - Session ID:', req.sessionID);
+  console.log('Check session - Session:', req.session);
+  console.log('Check session - Cookies:', req.headers.cookie);
+  res.json({ sessionID: req.sessionID, test: req.session.test || null });
+});
+
+// User info endpoint
 app.get('/api/user', ensureAuthenticated, (req, res) => {
   res.json({ google: req.user.google || null, clio: req.user.clio || null });
 });

@@ -48,6 +48,7 @@ function Dashboard() {
       const fetchMatters = async () => {
         try {
           const response = await axios.get(`${backendUrl}/api/matters`, { withCredentials: true });
+          console.log("Matter response",response);
           setMatters(response.data);
         } catch (err) {
           setError('Failed to fetch matters.');
@@ -67,7 +68,7 @@ function Dashboard() {
 
       fetchEmails();
       fetchMatters();
-      fetchTimeEntries();
+      // fetchTimeEntries();
     }
   }, [user, backendUrl]);
 

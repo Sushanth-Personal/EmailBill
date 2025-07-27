@@ -508,17 +508,17 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
       throw new Error('Matter ID is required');
     }
 
-    // Validate matterId exists
-    const matterResponse = await axios.get('https://app.clio.com/api/v4/matters.json', {
-      headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
-      params: { fields: 'id,display_number', query: `id:${matterId}` }
-    });
+    // // Validate matterId exists
+    // const matterResponse = await axios.get('https://app.clio.com/api/v4/matters.json', {
+    //   headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
+    //   params: { fields: 'id,display_number', query: `id:${matterId}` }
+    // });
 
-    if (!matterResponse.data.data || matterResponse.data.data.length === 0) {
-      throw new Error(`Matter with ID ${matterId} not found`);
-    }
+    // if (!matterResponse.data.data || matterResponse.data.data.length === 0) {
+    //   throw new Error(`Matter with ID ${matterId} not found`);
+    // }
 
-    const validatedMatterId = matterResponse.data.data[0].id;
+    const validatedMatterId = matterId;
     console.log('Validated Matter ID:', validatedMatterId);
 
     // Create time entry via /activities.json

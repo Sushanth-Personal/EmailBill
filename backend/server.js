@@ -423,18 +423,50 @@ app.get('/api/emails', ensureAuthenticated, async (req, res) => {
 // Fetch Clio matters
 app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   try {
-    const response = await axios.get('https://app.clio.com/api/v4/matters.json', {
+    console.log('Fetching matters for user:', req.user.google?.profile?.id);
+    console.log('Clio Access Token:', req.user.clio?.accessToken || '[NOT SET]');
+    console.log('Clio Refresh Token:', req.user.clio?.refreshToken ? '[SET]' : '[NOT SET]');
+
+    if (!req.user.clio || !req.user.clio.accessToken) {
+      throw new Error('Missing Clio access token');
+    }
+
+    const endpoint = 'https://app.clio.com/api/v4/matters.json'; // Update to au.app.clio.com if needed
+    const response = await axios.get(endpoint, {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
+      params: {
+        fields: 'id,display_number,description,client{name,email}',
+        query: '00001-Wide' // Filter for Think Wide matter
+      }
     });
-    console.log("Matter response: ",response);
-    // const matters = response.data.data.map((matter) => ({
-    //   id: matter.id,
-    //   clientEmail: matter.client?.email || '',
-    // }));
-    res.json(response);
+
+    console.log('Clio matters response:', {
+      status: response.status,
+      dataCount: response.data.data?.length || 0,
+      meta: response.data.meta,
+      timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+    });
+
+    const matters = response.data.data.map((matter) => ({
+      id: matter.id,
+      displayNumber: matter.display_number,
+      description: matter.description || '',
+      clientEmail: matter.client?.email || ''
+    }));
+
+    res.json(matters);
   } catch (error) {
-    console.error('Error fetching matters:', error.response?.data || error);
-    res.status(500).json({ error: 'Failed to fetch matters' });
+    console.error('Error fetching matters:', {
+      message: error.message,
+      code: error.code,
+      response: error.response?.data,
+      status: error.response?.status,
+      timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+    });
+    res.status(error.response?.status || 500).json({
+      error: 'Failed to fetch matters',
+      details: error.response?.data?.error || error.message
+    });
   }
 });
 

@@ -426,6 +426,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
     const response = await axios.get('https://app.clio.com/api/v4/matters', {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
     });
+    console.log("Matter response: ",response);
     const matters = response.data.data.map((matter) => ({
       id: matter.id,
       clientEmail: matter.client?.email || '',

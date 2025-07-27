@@ -423,7 +423,7 @@ app.get('/api/emails', ensureAuthenticated, async (req, res) => {
 // Fetch Clio matters
 app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   try {
-    const response = await axios.get('https://app.clio.com/api/v4/matters/1.json', {
+    const response = await axios.get('https://app.clio.com/api/v4/matters', {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
     });
     console.log("Matter response: ",response);

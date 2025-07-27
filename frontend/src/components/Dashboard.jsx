@@ -86,10 +86,11 @@ function Dashboard() {
         setError('Please select a matter and enter a duration.');
         return;
       }
+      console.log("matters",matters);
       const response = await axios.post(
         `${backendUrl}/api/log-time`,
         {
-          matterId: selectedMatterId,
+          matterId: matters[0].clientId,
           duration: parseFloat(duration),
           description: description || 'Billable activity for matter'
         },

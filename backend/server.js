@@ -453,12 +453,13 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
       mattersResponse.data.data.map(async (matter) => {
         let clientEmail = '';
         if (matter.client?.id) {
+          console.log('This is client ID',matter.client.id);
           try {
             const contactResponse = await axios.get(`https://app.clio.com/api/v4/contacts/${matter.client.id}.json`, {
               headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
               params: { fields: 'email' }
             });
-            console.log(contactResponse);
+            console.log('contactResponse',contactResponse);
             clientEmail = contactResponse.data.data.email || '';
           } catch (contactError) {
             console.error('Error fetching contact email:', {
@@ -476,7 +477,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
           clientId: matter.client?.id || '',
           clientName: matter.client?.name || '',
           clientEmail:matter || '',
-          response: contactResponse || ''
+          clientEmail:clientEmail || ''
         };
       })
     );

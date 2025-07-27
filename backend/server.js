@@ -493,10 +493,10 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   }
 });
 
-app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
-  const { matterId, duration, description } = req.body; // matterId from request, duration in hours
+app.patch('/api/update-time-entry', ensureAuthenticated, async (req, res) => {
+  const { matterId, duration, description} = req.body;
   try {
-    console.log('Logging time entry for user:', req.user.google?.profile?.id);
+    console.log('Updating time entry for user:', req.user.google?.profile?.id);
     console.log('Clio Access Token:', req.user.clio?.accessToken || '[NOT SET]');
     console.log('Timestamp:', new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
 
@@ -504,11 +504,9 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
       throw new Error('Missing Clio access token');
     }
 
-    if (!matterId) {
-      throw new Error('Matter ID is required');
-    }
+   
 
-    // // Validate matterId exists
+    // Validate matterId
     // const matterResponse = await axios.get('https://app.clio.com/api/v4/matters.json', {
     //   headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
     //   params: { fields: 'id,display_number', query: `id:${matterId}` }
@@ -521,22 +519,24 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
     const validatedMatterId = matterId;
     console.log('Validated Matter ID:', validatedMatterId);
 
-    // Create time entry via /activities.json
-    const activityResponse = await axios.post(
-      'https://app.clio.com/api/v4/activities.json',
+    // Update time entry via /activities/{id}.json
+    const activityResponse = await axios.patch(
+      `https://app.clio.com/api/v4/activities.json`,
       {
-        type: 'TimeEntry',
-        matter: { id: validatedMatterId },
-        quantity: parseFloat(duration), // Duration in hours (e.g., 1.0)
-        description: description || 'Billable activity for matter',
-        date: new Date().toISOString().split('T')[0], // Today's date: 2025-07-27
-        note: `Logged at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
-        non_billable: false // Mark as billable
+        data: {
+          type: 'TimeEntry',
+          matter: { id: validatedMatterId },
+          quantity: Math.round(parseFloat(duration) * 3600), // Convert hours to seconds
+          description: description || 'Updated billable activity for matter',
+          date: new Date().toISOString().split('T')[0], // Today's date: 2025-07-27
+          note: note || `Updated at ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+          non_billable: false // Mark as billable
+        }
       },
       { headers: { Authorization: `Bearer ${req.user.clio.accessToken}` } }
     );
 
-    console.log('Time entry created:', {
+    console.log('Time entry updated:', {
       id: activityResponse.data.data.id,
       matterId: validatedMatterId,
       duration,
@@ -549,12 +549,13 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
         id: activityResponse.data.data.id,
         matterId: validatedMatterId,
         duration,
-        description,
-        date: activityResponse.data.data.date
+        description: activityResponse.data.data.description,
+        date: activityResponse.data.data.date,
+        note: activityResponse.data.data.note
       }
     });
   } catch (error) {
-    console.error('Error logging time entry:', {
+    console.error('Error updating time entry:', {
       message: error.message,
       code: error.code,
       response: error.response?.data,
@@ -562,7 +563,7 @@ app.post('/api/log-time', ensureAuthenticated, async (req, res) => {
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
     });
     res.status(error.response?.status || 500).json({
-      error: 'Failed to log time entry',
+      error: 'Failed to update time entry',
       details: error.response?.data?.error || error.message
     });
   }
@@ -590,41 +591,7 @@ app.post('/api/summarize', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Create Clio time entry
-app.post('/api/time-entry', ensureAuthenticated, async (req, res) => {
-  try {
-    const { matterId, duration, description, date } = req.body;
-    const response = await axios.post(
-      'https://app.clio.com/api/v4/time_entries',
-      { matter: { id: matterId }, quantity: duration * 3600, description, date },
-      { headers: { Authorization: `Bearer ${req.user.clio.accessToken}` } }
-    );
-    res.json(response.data);
-  } catch (error) {
-    console.error('Error creating time entry:', error.response?.data || error);
-    res.status(500).json({ error: 'Failed to create time entry' });
-  }
-});
 
-// Fetch Clio time entries
-app.get('/api/time-entries', ensureAuthenticated, async (req, res) => {
-  try {
-    const response = await axios.get('https://app.clio.com/api/v4/time_entries', {
-      headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
-    });
-    const timeEntries = response.data.data.map((entry) => ({
-      id: entry.id,
-      description: entry.description,
-      date: entry.date,
-      duration: entry.quantity / 3600,
-      matterId: entry.matter?.id,
-    }));
-    res.json(timeEntries);
-  } catch (error) {
-    console.error('Error fetching time entries:', error.response?.data || error);
-    res.status(500).json({ error: 'Failed to fetch time entries' });
-  }
-});
 
 // Health check
 app.get('/health', (req, res) => {

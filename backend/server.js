@@ -423,15 +423,15 @@ app.get('/api/emails', ensureAuthenticated, async (req, res) => {
 // Fetch Clio matters
 app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   try {
-    const response = await axios.get('https://app.clio.com/api/v4/matters.json', {
+    const response = await axios.get('https://app.clio.com/api/v4/matters/1.json', {
       headers: { Authorization: `Bearer ${req.user.clio.accessToken}` },
     });
     console.log("Matter response: ",response);
-    const matters = response.data.data.map((matter) => ({
-      id: matter.id,
-      clientEmail: matter.client?.email || '',
-    }));
-    res.json(matters);
+    // const matters = response.data.data.map((matter) => ({
+    //   id: matter.id,
+    //   clientEmail: matter.client?.email || '',
+    // }));
+    res.json(response);
   } catch (error) {
     console.error('Error fetching matters:', error.response?.data || error);
     res.status(500).json({ error: 'Failed to fetch matters' });

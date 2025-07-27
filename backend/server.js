@@ -325,38 +325,101 @@ app.get('/api/user', ensureAuthenticated, (req, res) => {
 
 // Fetch Gmail emails
 app.get('/api/emails', ensureAuthenticated, async (req, res) => {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
-  );
-  oauth2Client.setCredentials({
-    access_token: req.user.google.accessToken,
-    refresh_token: req.user.google.refreshToken
-  });
-  const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   try {
+    console.log('Fetching emails for user:', req.user.google?.profile?.id);
+    console.log('Access Token:', req.user.google?.accessToken);
+    console.log('Refresh Token:', req.user.google?.refreshToken ? '[SET]' : '[NOT SET]');
+
+    // Validate user data
+    if (!req.user.google || !req.user.google.accessToken) {
+      throw new Error('Missing Google access token');
+    }
+
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    oauth2Client.setCredentials({
+      access_token: req.user.google.accessToken,
+      refresh_token: req.user.google.refreshToken,
+    });
+
+    // Handle token refresh
+    oauth2Client.on('tokens', (tokens) => {
+      console.log('Refreshed tokens:', {
+        access_token: tokens.access_token,
+        expiry_date: tokens.expiry_date,
+      });
+      if (tokens.access_token) {
+        req.user.google.accessToken = tokens.access_token;
+        req.session.user = req.user;
+        req.session.save((err) => {
+          if (err) console.error('Session save error after token refresh:', err);
+        });
+      }
+    });
+
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Test API connectivity
+    const profile = await gmail.users.getProfile({ userId: 'me' });
+    console.log('Gmail profile:', profile.data);
+
+    // Fetch sent emails
     const response = await gmail.users.messages.list({
       userId: 'me',
-      q: 'from:me' // Filter for sent emails
+      q: 'from:me', // Filter for sent emails
+      maxResults: 10, // Limit to 10 emails for performance
     });
-    const messages = await Promise.all(
-      response.data.messages.map(async (msg) => {
-        const email = await gmail.users.messages.get({ userId: 'me', id: msg.id });
-        return {
-          id: email.data.id,
-          to: email.data.payload.headers.find(h => h.name === 'To')?.value,
-          subject: email.data.payload.headers.find(h => h.name === 'Subject')?.value,
-          date: email.data.payload.headers.find(h => h.name === 'Date')?.value
-        };
+    const messages = response.data.messages || [];
+    console.log('Fetched messages:', messages.length);
+
+    if (messages.length === 0) {
+      console.log('No sent emails found for user:', req.user.google.profile.id);
+      return res.json([]); // Return empty array if no emails
+    }
+
+    const emails = await Promise.all(
+      messages.map(async (msg) => {
+        try {
+          const message = await gmail.users.messages.get({ userId: 'me', id: msg.id });
+          const headers = message.data.payload?.headers || [];
+          const subject = headers.find((h) => h.name === 'Subject')?.value || 'No Subject';
+          const to = headers.find((h) => h.name === 'To')?.value || 'Unknown';
+          const date = headers.find((h) => h.name === 'Date')?.value || new Date().toISOString();
+          let body = '';
+          if (message.data.payload?.parts) {
+            const textPart = message.data.payload.parts.find((part) => part.mimeType === 'text/plain');
+            if (textPart && textPart.body?.data) {
+              body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+            }
+          } else if (message.data.payload?.body?.data) {
+            body = Buffer.from(message.data.payload.body.data, 'base64').toString('utf-8');
+          }
+          return { id: msg.id, subject, to, date, body };
+        } catch (error) {
+          console.error('Error fetching email ID:', msg.id, {
+            message: error.message,
+            code: error.code,
+          });
+          return { id: msg.id, subject: 'Error', to: 'Unknown', date: new Date().toISOString(), body: 'Failed to fetch email content' };
+        }
       })
     );
-    res.json(messages);
+
+    res.json(emails);
   } catch (error) {
-    console.error('Error fetching emails:', error);
-    res.status(500).json({ error: 'Failed to fetch emails' });
+    console.error('Error fetching emails:', {
+      message: error.message,
+      stack: error.stack,
+      code: error.code,
+      response: error.response?.data,
+    });
+    res.status(500).json({ error: 'Failed to fetch emails', details: error.message });
   }
 });
+
 // Fetch Clio matters
 app.get('/api/matters', ensureAuthenticated, async (req, res) => {
   try {

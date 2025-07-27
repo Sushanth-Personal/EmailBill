@@ -443,7 +443,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
 
     console.log('Clio matters response:', {
       status: mattersResponse.status,
-      data: mattersResponse.data.data.entries(),
+      data: mattersResponse.data.data.client.primary_email_address,
       dataCount: mattersResponse.data.data?.length || 0,
       meta: mattersResponse.data.meta,
       timestamp: new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
@@ -459,7 +459,7 @@ app.get('/api/matters', ensureAuthenticated, async (req, res) => {
               params: { fields: 'email' }
             });
             console.log(contactResponse);
-            clientEmail = contactResponse.data.data.email || '';
+            clientEmail = contactResponse.data.data.client.primary_email_address || '';
           } catch (contactError) {
             console.error('Error fetching contact email:', {
               message: contactError.message,
